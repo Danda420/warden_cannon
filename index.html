@@ -221,8 +221,8 @@ function solve() {
   const deltaZ = tZ - launchZ;
 
   // Invert the 0.9 powder snow brake to find required raw tick-0 motion
-  const reqMotionX = deltaX / 0.90201835;
-  const reqMotionZ = deltaZ / 0.90201835;
+  const reqMotionX = deltaX / 0.9;
+  const reqMotionZ = deltaZ / 0.9;
 
   // Solve 2x2 linear matrix for item counts (nA and nB)
   // reqMotionX = aX * nA + bX * nB
