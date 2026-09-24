@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Warden Cannon Calculator</title>
+<link rel="icon" href="https://static.wikia.nocookie.net/minecraft_gamepedia/images/f/f6/Ender_Pearl_JE3_BE2.png/revision/latest/thumbnail/width/360/height/360?cb=20200512195721" />
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  :root{
+    --bg: #121212;
+    --panel: #1f1f1f;
+    --panel-2: #171717;
+    --line: #333333;
+    --ink: #ffffff;
+    --ink-dim: #aaaaaa;
+    --ink-faint: #979797;
+    --blue: #3b82f6;
+    --blue-bright: #60a5fa;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --green: #22c55e;
+  }
+  *{ box-sizing: border-box; }
+  body{
+    margin:0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: 'Inter', sans-serif;
+    min-height: 100vh;
+  }
+  .wrap{ max-width: 880px; margin: 0 auto; padding: 0 20px 60px; }
+  .header-container{ background: var(--panel); padding: 28px 20px; margin-bottom: 28px; }
+  .header-inner{ max-width: 880px; margin: 0 auto; padding: 0 20px; }
+  h1{ font-size: 28px; font-weight: 800; margin: 0 0 4px; }
+  .subtitle{ color: var(--ink-dim); font-size: 14px; margin: 0; }
+  .sub-desc{ color: var(--ink-faint); font-size: 13px; margin: 10px 0 0; max-width: 560px; line-height: 1.5; }
+
+  .grid2{ display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 640px){ .grid2{ grid-template-columns: 1fr; } }
+
+  .card{ background: var(--panel); border-radius: 0.75rem; padding: 18px 20px; box-shadow: 0 4px 8px rgba(0,0,0,0.2); transition: box-shadow 0.2s; }
+  .card:hover{ box-shadow: 0 6px 14px rgba(0,0,0,0.3); }
+  .panel-label{ font-size: 12px; font-weight: 600; letter-spacing: 0.5px; text-transform: uppercase; color: var(--blue-bright); margin: 0 0 14px; }
+
+  .coord-row{ display:flex; gap: 10px; }
+  .field{ flex:1; }
+  label{ display:block; font-size: 12px; color: var(--ink-faint); margin-bottom: 6px; }
+  input, select{
+    width: 100%;
+    background: var(--panel-2);
+    border: 1px solid var(--line);
+    color: var(--ink);
+    font-size: 15px;
+    padding: 10px 12px;
+    border-radius: 0.5rem;
+    outline: none;
+  }
+  input:focus, select:focus{ border-color: var(--blue); }
+  select option{ background: var(--panel-2); }
+
+  button.solve{
+    margin-top: 18px; width: 100%; background: var(--blue); color: #fff;
+    border: none; font-weight: 600; font-size: 14px; letter-spacing: 0.3px;
+    padding: 13px; border-radius: 0.5rem; cursor: pointer; transition: background 0.15s ease;
+  }
+  button.solve:hover{ background: var(--blue-bright); }
+
+  .results{ margin-top: 20px; display: flex; flex-direction: column; gap: 20px; }
+  .hidden{ display:none; }
+
+  .load-times{ display:grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 2px; }
+  .load-card{
+    background: var(--panel-2); border: 1px solid var(--line);
+    border-left: 3px solid var(--blue); border-radius: 0.5rem; padding: 14px 16px;
+  }
+  .load-card .axis{ font-size: 12px; color: var(--blue-bright); letter-spacing: 0.5px; text-transform: uppercase; font-weight: 600; }
+  .load-card .time{ font-size: 28px; font-weight: 800; margin-top: 4px; }
+  .load-card .time span{ font-size: 14px; color: var(--ink-faint); font-weight: 400; }
+  .load-card .stacks{ color: var(--ink-faint); font-size: 13px; margin-top: 2px; }
+
+  .landing-details{ margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 14px; color: var(--ink-dim); line-height: 1.8; }
+  .landing-details b{ color: var(--ink); }
+
+  .rotation-group{ display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+  .rot-btn{
+    flex: 1; min-width: 60px;
+    background: var(--panel-2); border: 1px solid var(--line);
+    color: var(--ink-dim); font-size: 13px; font-weight: 600;
+    padding: 9px 8px; border-radius: 0.5rem; cursor: pointer;
+    transition: all 0.12s ease; text-align: center; user-select: none;
+  }
+  .rot-btn:hover{ border-color: var(--blue); color: var(--ink); }
+  .rot-btn.active{ background: var(--blue); border-color: var(--blue); color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="header-container">
+  <div class="header-inner">
+    <h1>Warden Cannon Calculator</h1>
+    <p class="sub-desc">Enter cannon origin and target coordinates. Each axis has a 20-TNT-batch duper (bulk) and a 10-TNT-batch duper ("fine" adjustment). The calculator splits the required load between them automatically.</p>
+  </div>
+</div>
+
+<div class="wrap">
+
+  <div class="grid2">
+    <div class="card">
+      <p class="panel-label">Cannon origin</p>
+      <div class="coord-row">
+        <div class="field">
+          <label>X</label>
+          <input type="number" id="originX" value="0">
+        </div>
+        <div class="field">
+          <label>Z</label>
+          <input type="number" id="originZ" value="0">
+        </div>
+      </div>
+      <div style="margin-top:14px;">
+        <label>Facing direction</label>
+        <div class="rotation-group" id="rotGroup">
+          <div class="rot-btn active" data-rot="SE" onclick="selectRot(this)">SE</div>
+          <div class="rot-btn" data-rot="SW" onclick="selectRot(this)">SW</div>
+          <div class="rot-btn" data-rot="NE" onclick="selectRot(this)">NE</div>
+          <div class="rot-btn" data-rot="NW" onclick="selectRot(this)">NW</div>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <p class="panel-label">Target coordinate</p>
+      <div class="coord-row">
+        <div class="field">
+          <label>X</label>
+          <input type="number" id="targetX" placeholder="e.g. 9988">
+        </div>
+        <div class="field">
+          <label>Z</label>
+          <input type="number" id="targetZ" placeholder="e.g. 4995">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button class="solve" onclick="solve()">Solve</button>
+
+  <div id="results" class="results hidden"></div>
+
+</div>
+
+<script>
+
+const CANNON_CONFIGS = {
+  SE: { 
+    axisA: 'E', axisB: 'S', 
+    offsetX: 0.5, offsetZ: 0.5, 
+    aX: 4.102933, aZ: 0.081246, 
+    bX: 0.060653, bZ: 4.104224 
+  },
+  SW: { 
+    axisA: 'W', axisB: 'S', 
+    offsetX: -0.5, offsetZ: 0.5, 
+    aX: -4.104224, aZ: 0.060653, 
+    bX: -0.081246, bZ: 4.102933
+  },
+  NE: { 
+    axisA: 'E', axisB: 'N', 
+    offsetX: 0.5, offsetZ: -0.5, 
+    aX: 4.102933, aZ: -0.060653, 
+    bX: 0.081246, bZ: -4.104224
+  },
+  NW: { 
+    axisA: 'W', axisB: 'N', 
+    offsetX: -0.5, offsetZ: -0.5, 
+    aX: -4.102933, aZ: -0.081246, 
+    bX: -0.060653, bZ: -4.104224 
+  }
+};
+
+const AXIS_NAME = { N:'North', E:'East', S:'South', W:'West' };
+let selectedRot = 'SE';
+
+function selectRot(el) {
+  document.querySelectorAll('.rot-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  selectedRot = el.dataset.rot;
+}
+
+function formatStacks(n) {
+  const s = Math.floor(n/64), r = n%64;
+  if (s === 0) return `${r} items`;
+  if (r === 0) return `${s} \u00d7 64`;
+  return `${s} \u00d7 64 + ${r} items`;
+}
+
+function decomposeBatches(n) {
+  const n20 = Math.floor(n / 2);
+  const n10 = n % 2;
+  return { n20, n10 };
+}
+
+function solve() {
+  const oX = parseFloat(document.getElementById('originX').value) || 0;
+  const oZ = parseFloat(document.getElementById('originZ').value) || 0;
+  const tX = parseFloat(document.getElementById('targetX').value);
+  const tZ = parseFloat(document.getElementById('targetZ').value);
+
+  if (isNaN(tX) || isNaN(tZ)) { alert('Enter a target X and Z.'); return; }
+
+  const cfg = CANNON_CONFIGS[selectedRot];
+  
+  // Account for sub-block alignment origin offset
+  const launchX = oX + cfg.offsetX;
+  const launchZ = oZ + cfg.offsetZ;
+
+  // Determine required displacement from launch point
+  const deltaX = tX - launchX;
+  const deltaZ = tZ - launchZ;
+
+  // Invert the 0.9 powder snow brake to find required raw tick-0 motion
+  const reqMotionX = deltaX / 0.90201835;
+  const reqMotionZ = deltaZ / 0.90201835;
+
+  // Solve 2x2 linear matrix for item counts (nA and nB)
+  // reqMotionX = aX * nA + bX * nB
+  // reqMotionZ = aZ * nA + bZ * nB
+  const det = (cfg.aX * cfg.bZ) - (cfg.bX * cfg.aZ);
+  const nA = Math.max(0, Math.round((reqMotionX * cfg.bZ - reqMotionZ * cfg.bX) / det));
+  const nB = Math.max(0, Math.round((reqMotionZ * cfg.aX - reqMotionX * cfg.aZ) / det));
+
+  // Calculate resulting motion and precise landing coordinate check
+  const totalMotionX = (cfg.aX * nA) + (cfg.bX * nB);
+  const totalMotionZ = (cfg.aZ * nA) + (cfg.bZ * nB);
+
+  const landingX = launchX + (totalMotionX * 0.9);
+  const landingZ = launchZ + (totalMotionZ * 0.9);
+
+  renderResults({
+    rot: cfg,
+    nA,
+    nB,
+    landing: { x: landingX, z: landingZ },
+  });
+}
+
+function renderResults(r) {
+  const div = document.getElementById('results');
+  div.classList.remove('hidden');
+
+  const decompA = decomposeBatches(r.nA);
+  const decompB = decomposeBatches(r.nB);
+
+  const totalTNT = (r.nA + r.nB) * 10;
+
+  div.innerHTML = `
+    <div class="card">
+      <p class="panel-label">Required item counts</p>
+      <div class="load-times">
+        <div class="load-card">
+          <div class="axis">${AXIS_NAME[r.rot.axisA]} &dash; 20 duper</div>
+          <div class="time">${decompA.n20}<span> items</span></div>
+          <div class="stacks">${formatStacks(decompA.n20)}</div>
+        </div>
+        <div class="load-card">
+          <div class="axis">${AXIS_NAME[r.rot.axisB]} &dash; 20 duper</div>
+          <div class="time">${decompB.n20}<span> items</span></div>
+          <div class="stacks">${formatStacks(decompB.n20)}</div>
+        </div>
+        <div class="load-card">
+          <div class="axis">${AXIS_NAME[r.rot.axisA]} &dash; 10 duper</div>
+          <div class="time">${decompA.n10}<span> item${decompA.n10===1?'':'s'}</span></div>
+          <div class="stacks">${decompA.n10 === 0 ? 'not needed' : 'exact fine-adjust'}</div>
+        </div>
+        <div class="load-card">
+          <div class="axis">${AXIS_NAME[r.rot.axisB]} &dash; 10 duper</div>
+          <div class="time">${decompB.n10}<span> item${decompB.n10===1?'':'s'}</span></div>
+          <div class="stacks">${decompB.n10 === 0 ? 'not needed' : 'exact fine-adjust'}</div>
+        </div>
+      </div>
+      <div class="landing-details">
+        Predicted landing (expect 1-20 ish blocks offset): <b>${r.landing.x.toFixed(0)}, ${r.landing.z.toFixed(0)}</b><br>
+        Total TNT loaded: <b>${totalTNT}</b> (${AXIS_NAME[r.rot.axisA]}: ${r.nA*10}, ${AXIS_NAME[r.rot.axisB]}: ${r.nB*10})
+      </div>
+    </div>
+  `;
+}
+</script>
+</body>
+</html>
