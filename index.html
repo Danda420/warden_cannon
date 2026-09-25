@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Warden Cannon Calculator</title>
-<link rel="icon" href="https://static.wikia.nocookie.net/minecraft_gamepedia/images/f/f6/Ender_Pearl_JE3_BE2.png/revision/latest/thumbnail/width/360/height/360?cb=20200512195721" />
+<link rel="icon" href="https://minecraftfaces.com/wp-content/bigfaces/big-warden-face.png" />
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <script src="https://cdn.tailwindcss.com"></script>
@@ -19,8 +19,6 @@
     --ink-faint: #979797;
     --blue: #3b82f6;
     --blue-bright: #60a5fa;
-    --amber: #f59e0b;
-    --red: #ef4444;
     --green: #22c55e;
   }
   *{ box-sizing: border-box; }
@@ -202,6 +200,27 @@ function decomposeBatches(n) {
   return { n20, n10 };
 }
 
+// Single-axis loads are perfectly linear. When BOTH axes are loaded, the overlapping
+// min(nA,nB) units behave slightly differently: A gains ~0.06%, B loses ~0.5%.
+// Expressed in each cannon's own A/B frame so it carries over to other rotations
+const COUPLING = { P: 0.00059913, Q: -0.00509866 };
+
+// Forward model: raw tick-0 motion for nA, nB units (10 TNT each)
+function motionFor(cfg, nA, nB) {
+  const m = Math.min(nA, nB);
+  const effA = nA + COUPLING.P * m;
+  const effB = nB + COUPLING.Q * m;
+  return {
+    x: cfg.aX * effA + cfg.bX * effB,
+    z: cfg.aZ * effA + cfg.bZ * effB
+  };
+}
+
+function landingFor(cfg, launchX, launchZ, nA, nB) {
+  const mo = motionFor(cfg, nA, nB);
+  return { x: launchX + mo.x * 0.9, z: launchZ + mo.z * 0.9 };
+}
+
 function solve() {
   const oX = parseFloat(document.getElementById('originX').value) || 0;
   const oZ = parseFloat(document.getElementById('originZ').value) || 0;
@@ -211,39 +230,60 @@ function solve() {
   if (isNaN(tX) || isNaN(tZ)) { alert('Enter a target X and Z.'); return; }
 
   const cfg = CANNON_CONFIGS[selectedRot];
-  
+
   // Account for sub-block alignment origin offset
   const launchX = oX + cfg.offsetX;
   const launchZ = oZ + cfg.offsetZ;
 
-  // Determine required displacement from launch point
-  const deltaX = tX - launchX;
-  const deltaZ = tZ - launchZ;
+  // Required raw tick-0 motion (inverting the 0.9 powder snow brake)
+  const reqX = (tX - launchX) / 0.9;
+  const reqZ = (tZ - launchZ) / 0.9;
 
-  // Invert the 0.9 powder snow brake to find required raw tick-0 motion
-  const reqMotionX = deltaX / 0.9;
-  const reqMotionZ = deltaZ / 0.9;
-
-  // Solve 2x2 linear matrix for item counts (nA and nB)
-  // reqMotionX = aX * nA + bX * nB
-  // reqMotionZ = aZ * nA + bZ * nB
   const det = (cfg.aX * cfg.bZ) - (cfg.bX * cfg.aZ);
-  const nA = Math.max(0, Math.round((reqMotionX * cfg.bZ - reqMotionZ * cfg.bX) / det));
-  const nB = Math.max(0, Math.round((reqMotionZ * cfg.aX - reqMotionX * cfg.aZ) / det));
 
-  // Calculate resulting motion and precise landing coordinate check
-  const totalMotionX = (cfg.aX * nA) + (cfg.bX * nB);
-  const totalMotionZ = (cfg.aZ * nA) + (cfg.bZ * nB);
+  // Fixed-point iteration: motion = A*nA + B*nB + (A*P + B*Q)*min(nA,nB).
+  // Guess m, move the coupling term to the right side, solve the linear 2x2,
+  // update m, repeat until it settles.
+  let nA = 0, nB = 0;
+  for (let i = 0; i < 100; i++) {
+    const m = Math.min(nA, nB);
+    const cx = (cfg.aX * COUPLING.P + cfg.bX * COUPLING.Q) * m;
+    const cz = (cfg.aZ * COUPLING.P + cfg.bZ * COUPLING.Q) * m;
+    const rx = reqX - cx, rz = reqZ - cz;
+    const newA = Math.max(0, (rx * cfg.bZ - rz * cfg.bX) / det);
+    const newB = Math.max(0, (rz * cfg.aX - rx * cfg.aZ) / det);
+    const done = Math.abs(newA - nA) < 1e-9 && Math.abs(newB - nB) < 1e-9;
+    nA = newA; nB = newB;
+    if (done) break;
+  }
 
-  const landingX = launchX + (totalMotionX * 0.9);
-  const landingZ = launchZ + (totalMotionZ * 0.9);
+  // pick the closest landing
+  let best = null;
+  const baseA = Math.round(nA), baseB = Math.round(nB);
+  for (let da = -3; da <= 3; da++) {
+    for (let db = -3; db <= 3; db++) {
+      const a = Math.max(0, baseA + da), b = Math.max(0, baseB + db);
+      const l = landingFor(cfg, launchX, launchZ, a, b);
+      const err = Math.hypot(l.x - tX, l.z - tZ);
+      if (!best || err < best.err) best = { a, b, l, err };
+    }
+  }
 
   renderResults({
     rot: cfg,
-    nA,
-    nB,
-    landing: { x: landingX, z: landingZ },
+    nA: best.a,
+    nB: best.b,
+    landing: best.l
   });
+}
+
+// Load time
+const LOAD_TICKS_PER_BATCH = 52;
+const LOAD_TICKS_BASE = 76;
+const TRANSPORT_ALIGN_TICKS = 310;
+
+function loadTicksFor(batches) {
+  return batches > 0 ? LOAD_TICKS_PER_BATCH * batches + LOAD_TICKS_BASE : 0;
 }
 
 function renderResults(r) {
@@ -255,37 +295,62 @@ function renderResults(r) {
 
   const totalTNT = (r.nA + r.nB) * 10;
 
+  const effA = decompA.n20 + (decompA.n10 ? 1 : 0);
+  const effB = decompB.n20 + (decompB.n10 ? 1 : 0);
+  const maxBatch = Math.max(effA, effB);
+  const loadTicks = loadTicksFor(maxBatch);
+  const totalTicks = loadTicks + TRANSPORT_ALIGN_TICKS;
+
   div.innerHTML = `
     <div class="card">
-      <p class="panel-label">Required item counts</p>
+      <p class="panel-label">Required load</p>
       <div class="load-times">
         <div class="load-card">
-          <div class="axis">${AXIS_NAME[r.rot.axisA]} &dash; 20 duper</div>
+          <div class="axis">${AXIS_NAME[r.rot.axisA]} &dash; chest</div>
           <div class="time">${decompA.n20}<span> items</span></div>
           <div class="stacks">${formatStacks(decompA.n20)}</div>
         </div>
         <div class="load-card">
-          <div class="axis">${AXIS_NAME[r.rot.axisB]} &dash; 20 duper</div>
+          <div class="axis">${AXIS_NAME[r.rot.axisB]} &dash; chest</div>
           <div class="time">${decompB.n20}<span> items</span></div>
           <div class="stacks">${formatStacks(decompB.n20)}</div>
         </div>
-        <div class="load-card">
-          <div class="axis">${AXIS_NAME[r.rot.axisA]} &dash; 10 duper</div>
-          <div class="time">${decompA.n10}<span> item${decompA.n10===1?'':'s'}</span></div>
-          <div class="stacks">${decompA.n10 === 0 ? 'not needed' : 'exact fine-adjust'}</div>
+        <div class="load-card" style="border-left-color: ${decompA.n10 ? 'var(--green)' : 'var(--line)'};">
+          <div class="axis">${AXIS_NAME[r.rot.axisA]} &dash; lamp</div>
+          <div class="time" style="font-size:22px; color:${decompA.n10 ? 'var(--green)' : 'var(--ink-faint)'};">${decompA.n10 ? 'ON' : 'OFF'}</div>
+          <div class="stacks">${decompA.n10 ? 'exact fine-adjust' : 'not needed'}</div>
         </div>
-        <div class="load-card">
-          <div class="axis">${AXIS_NAME[r.rot.axisB]} &dash; 10 duper</div>
-          <div class="time">${decompB.n10}<span> item${decompB.n10===1?'':'s'}</span></div>
-          <div class="stacks">${decompB.n10 === 0 ? 'not needed' : 'exact fine-adjust'}</div>
+        <div class="load-card" style="border-left-color: ${decompB.n10 ? 'var(--green)' : 'var(--line)'};">
+          <div class="axis">${AXIS_NAME[r.rot.axisB]} &dash; lamp</div>
+          <div class="time" style="font-size:22px; color:${decompB.n10 ? 'var(--green)' : 'var(--ink-faint)'};">${decompB.n10 ? 'ON' : 'OFF'}</div>
+          <div class="stacks">${decompB.n10 ? 'exact fine-adjust' : 'not needed'}</div>
         </div>
       </div>
       <div class="landing-details">
-        Predicted landing (expect 1-20 ish blocks offset): <b>${r.landing.x.toFixed(0)}, ${r.landing.z.toFixed(0)}</b><br>
+        Predicted landing: <b>${r.landing.x.toFixed(0)}, ${r.landing.z.toFixed(0)}</b><br>
         Total TNT loaded: <b>${totalTNT}</b> (${AXIS_NAME[r.rot.axisA]}: ${r.nA*10}, ${AXIS_NAME[r.rot.axisB]}: ${r.nB*10})
       </div>
     </div>
+    <div class="card">
+      <p class="panel-label">Estimated wait time</p>
+      <div class="load-card" style="border-left-color: var(--blue);">
+        <div class="time" style="font-size:24px;">${formatTicks(totalTicks)}</div>
+        <div class="stacks">Load: ${formatTicks(loadTicks)} (${maxBatch} effective batches on busiest axis${(decompA.n10||decompB.n10) ? ', incl. fine lamp' : ''}) &nbsp;+&nbsp; Transport/align: ${formatTicks(TRANSPORT_ALIGN_TICKS)}</div>
+      </div>
+    </div>
   `;
+}
+
+function formatTicks(t) {
+  const totalSec = t / 20;
+  const h = Math.floor(totalSec / 3600);
+  const m = Math.floor((totalSec % 3600) / 60);
+  const s = Math.floor(totalSec % 60);
+  const parts = [];
+  if (h > 0) parts.push(`${h}h`);
+  if (h > 0 || m > 0) parts.push(`${m}m`);
+  parts.push(`${s}s`);
+  return parts.join(' ');
 }
 </script>
 </body>
