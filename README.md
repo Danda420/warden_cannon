@@ -4,5 +4,5 @@ smaller than the initial design, 490 items cheaper, faster load time (yes, even 
 ### Building
 no hopper timer items needed here, just make sure you aligned the cannon properly to the intersection of 4 chunks based on that stained glass at the top of the cannon in that schematic.
 
-# Calculator
+### Calculator
 basically the same...
