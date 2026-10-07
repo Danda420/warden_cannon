@@ -99,7 +99,7 @@
 <div class="header-container">
   <div class="header-inner">
     <h1>Warden Cannon Calculator</h1>
-    <p class="sub-desc">Enter cannon origin and target coordinates. The calculator splits the required load between them automatically.</p>
+    <p class="sub-desc">Enter cannon origin and target coordinates. Pick Original or Paper-friendly duper variant based on what you've built.</p>
   </div>
 </div>
 
@@ -125,6 +125,13 @@
           <div class="rot-btn" data-rot="SW" onclick="selectRot(this)">SW</div>
           <div class="rot-btn" data-rot="NE" onclick="selectRot(this)">NE</div>
           <div class="rot-btn" data-rot="NW" onclick="selectRot(this)">NW</div>
+        </div>
+      </div>
+      <div style="margin-top:14px;">
+        <label>Duper variant</label>
+        <div class="rotation-group" id="varGroup">
+          <div class="rot-btn active" data-var="original" onclick="selectVariant(this)">Original</div>
+          <div class="rot-btn" data-var="paper" onclick="selectVariant(this)">Paper-friendly</div>
         </div>
       </div>
     </div>
@@ -181,10 +188,24 @@ const CANNON_CONFIGS = {
 const AXIS_NAME = { N:'North', E:'East', S:'South', W:'West' };
 let selectedRot = 'SE';
 
+// original: main item = 16 batches. fine-tune (1-15 items) = items+1 batches
+// paper: main item = 15 batches. fine-tune = items batches directly.
+const VARIANTS = {
+  original: { mainBatchesPerItem: 16, dropperMode: 'plusOne', maxDropper: 15, ticksPerBatch: 8,  stageTail: 73 },
+  paper:    { mainBatchesPerItem: 15, dropperMode: 'direct',  maxDropper: 16, ticksPerBatch: 16, stageTail: 79 }
+};
+let selectedVariant = 'original';
+
 function selectRot(el) {
   document.querySelectorAll('#rotGroup .rot-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
   selectedRot = el.dataset.rot;
+}
+
+function selectVariant(el) {
+  document.querySelectorAll('#varGroup .rot-btn').forEach(b => b.classList.remove('active'));
+  el.classList.add('active');
+  selectedVariant = el.dataset.var;
 }
 
 function formatStacks(n) {
@@ -194,20 +215,25 @@ function formatStacks(n) {
   return `${s} \u00d7 64 + ${r} items`;
 }
 
-function decomposeBatches(n) {
+function decomposeBatches(n, v) {
   if (n <= 0) return { mainItems: 0, dropperItems: 0 };
-  const mainItems = Math.floor((n - 2) / 16);
-  const remainder = n - 16 * mainItems;
-  const dropperItems = remainder - 1;
-  return { mainItems, dropperItems };
+  const P = v.mainBatchesPerItem;
+  if (v.dropperMode === 'plusOne') {
+    const mainItems = Math.floor((n - 2) / P);
+    const remainder = n - P * mainItems;
+    return { mainItems, dropperItems: remainder - 1 };
+  }
+  const mainItems = Math.floor(n / P);
+  const remainder = n - P * mainItems;
+  return { mainItems, dropperItems: remainder };
 }
 
-// Re-fit after the "more even accel" redesign - the old constants were from the previous
-// geometry and were making predictions worse, not better. Single-axis loads are confirmed
-// perfectly linear (no correction needed). When both axes are loaded, deviation from the
-// linear sum is proportional to min(nA,nB): CROSS_X ~ -0.039/unit, CROSS_Z ~ +0.0016/unit.
-// Fit from two equal-load tests (m=4000, m=5358) and validated against an asymmetric
-// real shot (m=2633) to within 0.1 blocks - holds across load ratios, not just equal loads.
+function isAchievable(n, v) {
+  if (n <= 0) return true;
+  if (v.dropperMode === 'plusOne') return n !== 1;
+  return (n % v.mainBatchesPerItem) <= v.maxDropper;
+}
+
 const COUPLING = { P: -0.009512772028424314, Q: 0.000535578795417283 };
 
 // Forward model: raw tick-0 motion for nA, nB units (10 TNT each)
@@ -262,13 +288,15 @@ function solve() {
     if (done) break;
   }
 
+  const variant = VARIANTS[selectedVariant];
+
   // pick the closest landing
   let best = null;
   const baseA = Math.round(nA), baseB = Math.round(nB);
   for (let da = -3; da <= 3; da++) {
     for (let db = -3; db <= 3; db++) {
       const a = Math.max(0, baseA + da), b = Math.max(0, baseB + db);
-      if (a === 1 || b === 1) continue;
+      if (!isAchievable(a, variant) || !isAchievable(b, variant)) continue;
       const l = landingFor(cfg, launchX, launchZ, a, b);
       const err = Math.hypot(l.x - tX, l.z - tZ);
       if (!best || err < best.err) best = { a, b, l, err };
@@ -279,50 +307,51 @@ function solve() {
     rot: cfg,
     nA: best.a,
     nB: best.b,
-    landing: best.l
+    landing: best.l,
+    variant
   });
 }
 
-// Load time, fit directly from timed in-game tests (1/16/32/64 main items -> 16/256/512/1024
-// internal 10-TNT batches). ticks = 8*batches + 73 matched 3 of 4 test points exactly; the
-// duper pipelines continuously across items rather than restarting per item, so what matters
-// is TOTAL internal batches for a stage, not item count. Same duping clock drives the fine-tune
-// dropper, so the same formula applies there too (mainItems*16 batches for the main stage,
-// dropperItems+1 batches for the fine stage).
+// load time
 const TRANSPORT_ALIGN_TICKS = 513;
-const TICKS_PER_BATCH = 8;
-const STAGE_TAIL_TICKS = 73;
 
-function stageTicks(batchCount) {
-  return batchCount > 0 ? TICKS_PER_BATCH * batchCount + STAGE_TAIL_TICKS : 0;
+function stageTicks(batchCount, v) {
+  return batchCount > 0 ? v.ticksPerBatch * batchCount + v.stageTail : 0;
 }
 
 function renderResults(r) {
   const div = document.getElementById('results');
   div.classList.remove('hidden');
 
-  const decompA = decomposeBatches(r.nA);
-  const decompB = decomposeBatches(r.nB);
+  const variant = r.variant;
+  const decompA = decomposeBatches(r.nA, variant);
+  const decompB = decomposeBatches(r.nB, variant);
 
   const totalTNT = (r.nA + r.nB) * 10;
 
-  const mainBatchesA = decompA.mainItems * 16, mainBatchesB = decompB.mainItems * 16;
-  const dropperBatchesA = decompA.dropperItems > 0 ? decompA.dropperItems + 1 : 0;
-  const dropperBatchesB = decompB.dropperItems > 0 ? decompB.dropperItems + 1 : 0;
+  const dropperToBatches = (items) => {
+    if (items <= 0) return 0;
+    return variant.dropperMode === 'plusOne' ? items + 1 : items;
+  };
+  const mainBatchesA = decompA.mainItems * variant.mainBatchesPerItem;
+  const mainBatchesB = decompB.mainItems * variant.mainBatchesPerItem;
+  const dropperBatchesA = dropperToBatches(decompA.dropperItems);
+  const dropperBatchesB = dropperToBatches(decompB.dropperItems);
   const mainMax = Math.max(decompA.mainItems, decompB.mainItems);
   const dropperMax = Math.max(decompA.dropperItems, decompB.dropperItems);
-  const mainTicks = stageTicks(Math.max(mainBatchesA, mainBatchesB));
-  const dropperTicks = stageTicks(Math.max(dropperBatchesA, dropperBatchesB));
+  const mainTicks = stageTicks(Math.max(mainBatchesA, mainBatchesB), variant);
+  const dropperTicks = stageTicks(Math.max(dropperBatchesA, dropperBatchesB), variant);
   const totalTicks = TRANSPORT_ALIGN_TICKS + mainTicks + dropperTicks;
 
   const fineCard = (axis, d) => {
     const on = d > 0;
+    const batches = dropperToBatches(d);
     const color = on ? 'var(--green)' : 'var(--ink-faint)';
     return `
         <div class="load-card" style="border-left-color: ${on ? 'var(--green)' : 'var(--line)'};">
-          <div class="axis">${axis} &dash; fine-tune dropper</div>
+          <div class="axis">${axis} &dash; dropper</div>
           <div class="time" style="font-size:22px; color:${color};">${d}<span> item${d === 1 ? '' : 's'}</span></div>
-          <div class="stacks">${on ? `= ${d + 1} batches (${(d + 1) * 10} TNT)` : 'not needed'}</div>
+          <div class="stacks">${on ? `${batches} batch${batches === 1 ? '' : 'es'} (${batches * 10} TNT)` : 'not needed'}</div>
         </div>`;
   };
 
@@ -331,12 +360,12 @@ function renderResults(r) {
       <p class="panel-label">Required load</p>
       <div class="load-times">
         <div class="load-card">
-          <div class="axis">${AXIS_NAME[r.rot.axisA]} &dash; main duper</div>
+          <div class="axis">${AXIS_NAME[r.rot.axisA]} &dash; chest</div>
           <div class="time">${decompA.mainItems}<span> items</span></div>
           <div class="stacks">${formatStacks(decompA.mainItems)}</div>
         </div>
         <div class="load-card">
-          <div class="axis">${AXIS_NAME[r.rot.axisB]} &dash; main duper</div>
+          <div class="axis">${AXIS_NAME[r.rot.axisB]} &dash; chest</div>
           <div class="time">${decompB.mainItems}<span> items</span></div>
           <div class="stacks">${formatStacks(decompB.mainItems)}</div>
         </div>${fineCard(AXIS_NAME[r.rot.axisA], decompA.dropperItems)}${fineCard(AXIS_NAME[r.rot.axisB], decompB.dropperItems)}
